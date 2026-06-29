@@ -1,0 +1,6 @@
+UserPrincipalName,DisplayName,Department,JobTitle,RiskScore,RiskLevel,LastRiskySignIn,TorSignInDetected,AssociatedTorIP,AdminPrivileges,AccountStatus,Notes
+testuser@lab.onmicrosoft.com,Test User (Compromised),IT Security,SOC Analyst,95,Critical,2024-11-15T03:42:18Z,TRUE,185.220.101.47,TRUE,Suspended,Account used in Tor infiltration simulation - tokens revoked
+jdoe@lab.onmicrosoft.com,John Doe,Finance,Finance Manager,72,High,2024-11-10T14:22:05Z,FALSE,,FALSE,Active,Anomalous after-hours access pattern detected
+msmith@lab.onmicrosoft.com,Mike Smith,IT Operations,Cloud Administrator,85,High,2024-11-12T02:15:33Z,FALSE,,TRUE,Active,Privileged account with unusual resource deletion activity
+agarcia@lab.onmicrosoft.com,Ana Garcia,HR,HR Director,60,Medium,2024-11-08T09:45:00Z,FALSE,,FALSE,Active,Bulk data export flagged by UEBA
+kwilliams@lab.onmicrosoft.com,Kevin Williams,DevOps,DevOps Engineer,78,High,2024-11-14T23:10:44Z,TRUE,45.33.32.156,TRUE,Suspended,Second Tor sign-in detected - administrative access misused
