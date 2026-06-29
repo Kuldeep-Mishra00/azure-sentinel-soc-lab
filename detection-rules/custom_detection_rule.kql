@@ -1,0 +1,87 @@
+// ============================================================
+// Microsoft Sentinel - Custom KQL Detection Rules
+// SOC Lab: Advanced Tor Infiltration & Configuration Deletion
+// Author: Kuldeep Mishra
+// Framework: MITRE ATT&CK T1485 (Data Destruction), T1105 (Ingress Tool Transfer), T1090.003 (Proxy: Multi-hop Proxy)
+// ============================================================
+
+// ---------------------------------------------------------------
+// RULE 1: Tor Exit Node Sign-In Detection
+// Description: Detects successful or attempted sign-ins originating
+//              from known Tor exit node IP addresses using a watchlist.
+// Severity: HIGH
+// ---------------------------------------------------------------
+
+let TorNodes = (_GetWatchlist('Tor-IP-Address') | project TorIP = IpAddress);
+SigninLogs
+| where IPAddress in (TorNodes)
+| where ResultType != 50126  // Exclude invalid username/password errors (noise)
+| project
+    TimeGenerated,
+    Location,
+    IPAddress,
+    UserDisplayName,
+    UserPrincipalName,
+    UserId,
+    LocationDetails,
+    RiskState,
+    RiskLevelDuringSignIn,
+    AuthenticationRequirement,
+    ClientAppUsed,
+    ConditionalAccessAudiences
+| sort by TimeGenerated desc
+
+
+// ---------------------------------------------------------------
+// RULE 2: Unauthorized Configuration Deletion Detection
+// Description: Detects successful delete/remove operations on
+//              Azure resources performed by any user — flags
+//              potential data destruction or sabotage activity.
+// Severity: HIGH
+// ---------------------------------------------------------------
+
+AuditLogs
+| where OperationName has_any ("Delete", "Remove")
+| where Result == "success"
+| where isnotempty(tostring(InitiatedBy.user.userPrincipalName))
+| extend
+    InitiatedByUser = tostring(InitiatedBy.user.userPrincipalName),
+    TargetResource = tostring(TargetResources[0].displayName),
+    TargetResourceType = tostring(TargetResources[0].type)
+| project
+    TimeGenerated,
+    OperationName,
+    Result,
+    InitiatedByUser,
+    TargetResource,
+    TargetResourceType,
+    AdditionalDetails
+| sort by TimeGenerated desc
+
+
+// ---------------------------------------------------------------
+// RULE 3: Combined — Tor Sign-In Followed by Deletion (Correlated)
+// Description: Correlates Tor-originated logins with subsequent
+//              destructive administrative actions within a 1-hour window.
+// Severity: CRITICAL
+// ---------------------------------------------------------------
+
+let TorNodes = (_GetWatchlist('Tor-IP-Address') | project TorIP = IpAddress);
+let TorSignIns = SigninLogs
+    | where IPAddress in (TorNodes)
+    | where ResultType != 50126
+    | project SignInTime = TimeGenerated, UserPrincipalName, TorIP = IPAddress;
+AuditLogs
+| where OperationName has_any ("Delete", "Remove")
+| where Result == "success"
+| extend InitiatedByUser = tostring(InitiatedBy.user.userPrincipalName)
+| join kind=inner TorSignIns on $left.InitiatedByUser == $right.UserPrincipalName
+| where TimeGenerated between (SignInTime .. (SignInTime + 1h))
+| project
+    TimeGenerated,
+    SignInTime,
+    InitiatedByUser,
+    TorIP,
+    OperationName,
+    TargetResources
+| sort by TimeGenerated desc
