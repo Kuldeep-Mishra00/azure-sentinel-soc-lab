@@ -1,0 +1,5 @@
+# This folder contains screenshots from the SOC lab investigation.
+# Upload the following files here:
+# - sentinel_dashboard.png   : Microsoft Sentinel dashboard overview
+# - incident_graph.png       : Sentinel Incident Investigation Graph  
+# - remediation_success.pdf  : Executive SOC Incident Report (PDF)
