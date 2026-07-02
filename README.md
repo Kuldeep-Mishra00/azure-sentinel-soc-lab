@@ -11,7 +11,7 @@
 
 ## Overview
 
-The goal of this lab was to experience the **full SOC workflow end to end** — not just "turn on a SIEM," but ingest logs, author detections, generate a real alert, triage it, and remediate. I built the environment on Microsoft Sentinel over an Azure Log Analytics Workspace, enabled UEBA, and simulated an attacker signing in through the **Tor network** and destroying configuration, then detected and responded to it.
+The goal of this lab was to experience the **full SOC workflow end to end** — not just "turn on a SIEM," but ingest logs, author detections, generate a real alert, triage it, and remediate. I provisioned Microsoft Sentinel over an Azure Log Analytics Workspace (**SEC-Monitoring**), piped SigninLogs and AuditLogs into the SIEM pipeline, enabled UEBA, and simulated an attacker signing in through the **Tor network** and destroying configuration — then detected and responded to it.
 
 > ⚠️ **Ethics & scope:** All activity was performed against my own isolated lab tenant/resources. The "attack" is a controlled simulation for detection engineering practice.
 
@@ -21,7 +21,7 @@ The goal of this lab was to experience the **full SOC workflow end to end** — 
 
 ```mermaid
 flowchart TD
-    A[Azure AD Sign-ins / Activity Logs] --> B[(Azure Log Analytics Workspace)]
+    A[Azure AD Sign-ins / Audit Logs] --> B[(Azure Log Analytics Workspace<br/>SEC-Monitoring)]
     B --> C[Microsoft Sentinel]
     C --> D[UEBA<br/>behavioural analytics]
     C --> E[Custom KQL<br/>Analytics Rules]
@@ -34,53 +34,86 @@ flowchart TD
 
 ## Detections Authored
 
-I wrote custom **KQL analytics rules** for two attacker behaviours and mapped each to MITRE ATT&CK:
+I wrote custom **KQL analytics rules** for two attacker behaviours, both firing as high-severity incidents:
 
-| Detection | MITRE Technique |
-|---|---|
-| Sign-in from a Tor exit node | **T1090.003** — Proxy: Multi-hop Proxy |
-| Unauthorized configuration / resource deletion | **T1485** — Data Destruction |
-
-**Tor exit-node sign-in (T1090.003):**
+**Rule 1 — Tor exit-node sign-in detection:**
 ```kql
-// Flags interactive sign-ins originating from known Tor / anonymising infrastructure
+let TorNodes = (_GetWatchlist('Tor-IP-Address') | project TorIP = IpAddress);
 SigninLogs
-| where ResultType == 0                       // successful sign-ins
-| extend ip = tostring(IPAddress)
-| where isnotempty(ip)
-// join against Tor exit-node IP watchlist:
-| join kind=inner (
-    _GetWatchlist('TorExitNodes')
-    | project ip = tostring(SearchKey)
-) on ip
-| project TimeGenerated, UserPrincipalName, ip, Location, AppDisplayName
-| order by TimeGenerated desc
+| where IPAddress in (TorNodes)
+| where ResultType != 50126
+| project
+    TimeGenerated,
+    Location,
+    IPAddress,
+    UserDisplayName,
+    UserPrincipalName,
+    UserId,
+    LocationDetails,
+    RiskState,
+    RiskLevelDuringSignIn,
+    AuthenticationRequirement,
+    ClientAppUsed,
+    ConditionalAccessAudiences
 ```
 
-**Unauthorized config deletion (T1485):**
+**Rule 2 — Unauthorized configuration deletion detection:**
 ```kql
-// Surfaces delete operations across Azure resources for review
-AzureActivity
-| where OperationNameValue has "delete"
-| where ActivityStatusValue == "Success"
-| project TimeGenerated, Caller, OperationNameValue, ResourceGroup, _ResourceId, CallerIpAddress
-| order by TimeGenerated desc
+AuditLogs
+| where OperationName has_any ("Delete", "Remove")
+| where Result == "success"
+| where InitiatedBy.user.userPrincipalName != ""
+| project
+    TimeGenerated,
+    OperationName,
+    Result,
+    InitiatedBy,
+    TargetResources,
+    AdditionalDetails
 ```
 
 ---
 
 ## Incident Response Walkthrough
 
-1. **Simulated the attack** — signed in via Tor and performed an unauthorized configuration deletion.
-2. **Alerts fired** from the custom analytics rules; UEBA flagged the anomalous behaviour.
-3. **Triaged in the Investigation Graph** — pivoted across the user, IP, and affected resources to scope the incident.
-4. **Remediated** — revoked the compromised session tokens, restored the deleted configuration to baseline, and **exported a formal SOC incident report.**
+1. **Simulated the attack** — connected through the Tor Browser via a foreign exit node, authenticated with compromised test-user credentials, and executed unauthorized deletion of directory/resource configurations.
+2. **Alerts fired** — the custom analytics rules triggered high-severity incidents; UEBA flagged the anomalous behaviour.
+3. **Triaged in the Investigation Graph** — visually mapped the attack chain and blast radius, linking the compromised test user, the malicious Tor exit-node IP, and the tampered configuration assets.
+4. **Remediated** — revoked the compromised account's active sessions and refresh tokens via Microsoft Entra ID, restored secure baseline configurations, and **exported an official SOC Incident Report PDF** for audit compliance.
+
+---
+
+## MITRE ATT&CK Mapping
+
+| Tactic | Technique | ID |
+|---|---|---|
+| Impact | Data Destruction | **T1485** |
+| Command & Control | Ingress Tool Transfer | **T1105** |
+| Defense Evasion | Proxy: Multi-hop Proxy (Tor) | **T1090.003** |
+
+---
+
+## Repository Structure
+
+```
+├── README.md
+├── detection-rules/
+│   └── custom_detection_rule.kql
+├── watchlists/
+│   └── high_risk_users.csv
+└── screenshots/
+    ├── sentinel_dashboard.png
+    ├── incident_graph.png
+    └── remediation_success.pdf
+```
+
+> 📸 Screenshots and the final remediation PDF report are located in the `/screenshots` directory.
 
 ---
 
 ## Tools & Technology
 
-`Microsoft Sentinel` · `Azure Log Analytics Workspace` · `KQL (Kusto Query Language)` · `UEBA` · `MITRE ATT&CK` · `Investigation Graph` · `Incident Response`
+`Microsoft Sentinel` · `Azure Log Analytics Workspace (SEC-Monitoring)` · `Microsoft Entra ID` · `KQL (Kusto Query Language)` · `UEBA` · `MITRE ATT&CK` · `Investigation Graph` · `Incident Response` · `Tor (attack simulation)`
 
 ---
 
