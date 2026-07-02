@@ -1,137 +1,98 @@
-# Microsoft Sentinel SIEM: Threat Detection & Incident Response Lab
+# Microsoft Sentinel SIEM & SOC Lab — Tor Attack Simulation
 
-## (Advanced Tor Infiltration & Configuration Deletion Simulation)
+> A personal home-lab where I built a working SOC on Microsoft Sentinel, wrote custom **KQL detection rules mapped to MITRE ATT&CK**, then ran a full detection-to-response cycle against a simulated attack.
 
-## Project Overview
+![SIEM](https://img.shields.io/badge/SIEM-Microsoft%20Sentinel-0078D4)
+![Query](https://img.shields.io/badge/detections-KQL-blue)
+![Framework](https://img.shields.io/badge/mapped%20to-MITRE%20ATT%26CK-red)
+![Type](https://img.shields.io/badge/type-Home%20Lab-lightgrey)
 
-This project demonstrates the end-to-end deployment of a Cloud-Native SIEM using Microsoft Sentinel to architect a fully operational Security Operations Center (SOC) environment. Moving beyond baseline monitoring, this lab features a hands-on advanced attack simulation where a test user account was infiltrated via the Tor Anonymizing Network to execute malicious administrative actions, specifically unauthorized configuration deletions. The entire incident lifecycle—from ingestion and custom KQL alerts to deep graph investigation and final PDF report remediation—was executed and documented.
+---
 
-## Key Features & Lab Milestones
+## Overview
 
-- **Cloud SIEM & Data Ingestion:** Provisioned Microsoft Sentinel over a centralized Azure Log Analytics Workspace (SEC-Monitoring) to collect platform, identity, and security logs.
+The goal of this lab was to experience the **full SOC workflow end to end** — not just "turn on a SIEM," but ingest logs, author detections, generate a real alert, triage it, and remediate. I built the environment on Microsoft Sentinel over an Azure Log Analytics Workspace, enabled UEBA, and simulated an attacker signing in through the **Tor network** and destroying configuration, then detected and responded to it.
 
-- **Threat Intel & Behavioral Analytics (UEBA):** Configured User and Entity Behavior Analytics to track anomalous access footprints across cloud directory assets.
+> ⚠️ **Ethics & scope:** All activity was performed against my own isolated lab tenant/resources. The "attack" is a controlled simulation for detection engineering practice.
 
-- **Advanced Attack Simulation (Tor & Data Destruction):**
-  - Utilized the Tor Browser to route traffic through foreign exit nodes, simulating an obfuscated external threat actor utilizing compromised credentials.
-  - Executed malicious post-exploitation activity by deleting critical directory/resource configurations to simulate service disruption and data destruction.
+---
 
-- **Custom KQL Analytics Rules:** Authored targeted scheduled query rules using Kusto Query Language (KQL) to trigger high-severity incidents upon detecting signs of anonymized routing or unexpected administrative deletions.
+## Architecture
 
-- **SOC Triage & Incident Graph Investigation:** Conducted full triage using Sentinel's Investigation Graph to analyze the blast radius, linking the compromised test user entity, the malicious Tor exit node IP, and the tampered configuration assets.
+```mermaid
+flowchart TD
+    A[Azure AD Sign-ins / Activity Logs] --> B[(Azure Log Analytics Workspace)]
+    B --> C[Microsoft Sentinel]
+    C --> D[UEBA<br/>behavioural analytics]
+    C --> E[Custom KQL<br/>Analytics Rules]
+    E --> F{Alert fired}
+    F --> G[Investigation Graph<br/>triage]
+    G --> H[Response:<br/>revoke tokens · restore baseline · export IR report]
+```
 
-- **Remediation & Reporting:** Contained the threat by revoking active user tokens, restoring secure baselines, and exporting an official executive SOC Incident Report PDF for audit compliance.
+---
 
-## Technologies & Tools Used
+## Detections Authored
 
-| Category | Tool / Service |
+I wrote custom **KQL analytics rules** for two attacker behaviours and mapped each to MITRE ATT&CK:
+
+| Detection | MITRE Technique |
 |---|---|
-| SIEM Platform | Microsoft Sentinel |
-| Log Management | Log Analytics Workspace (LAW) |
-| Identity & Access Management | Microsoft Entra ID (Azure AD) |
-| Attack Infrastructure | Tor Browser Network (Anonymizing Exit Nodes) |
-| Query Language | Kusto Query Language (KQL) |
-| Framework Mapping | MITRE ATT&CK (T1485, T1105) |
+| Sign-in from a Tor exit node | **T1090.003** — Proxy: Multi-hop Proxy |
+| Unauthorized configuration / resource deletion | **T1485** — Data Destruction |
 
----
-
-## Technical Architecture & Simulation Steps
-
-### Phase 1: Ingestion & Sentinel Setup
-
-1. Deployed an Azure Log Analytics Workspace named **SEC-Monitoring** and enabled the Microsoft Sentinel solution on top of it.
-2. Enabled diagnostic settings across identity providers to pipe SigninLogs and AuditLogs directly into the SIEM pipeline.
-
-### Phase 2: Writing the KQL Detection Rules
-
-To catch the specific attack pattern simulated, custom KQL rules were implemented.
-
-**Rule 1 — Tor Exit Node Sign-In Detection:**
+**Tor exit-node sign-in (T1090.003):**
 ```kql
-let TorNodes = (_GetWatchlist('Tor-IP-Address') | project TorIP = IpAddress);
+// Flags interactive sign-ins originating from known Tor / anonymising infrastructure
 SigninLogs
-| where IPAddress in (TorNodes)
-| where ResultType != 50126
-| project
-    TimeGenerated,
-    Location,
-    IPAddress,
-    UserDisplayName,
-    UserPrincipalName,
-    UserId,
-    LocationDetails,
-    RiskState,
-    RiskLevelDuringSignIn,
-    AuthenticationRequirement,
-    ClientAppUsed,
-    ConditionalAccessAudiences
+| where ResultType == 0                       // successful sign-ins
+| extend ip = tostring(IPAddress)
+| where isnotempty(ip)
+// join against Tor exit-node IP watchlist:
+| join kind=inner (
+    _GetWatchlist('TorExitNodes')
+    | project ip = tostring(SearchKey)
+) on ip
+| project TimeGenerated, UserPrincipalName, ip, Location, AppDisplayName
+| order by TimeGenerated desc
 ```
 
-**Rule 2 — Unauthorized Configuration Deletion Detection:**
+**Unauthorized config deletion (T1485):**
 ```kql
-AuditLogs
-| where OperationName has_any ("Delete", "Remove")
-| where Result == "success"
-| where InitiatedBy.user.userPrincipalName != ""
-| project
-    TimeGenerated,
-    OperationName,
-    Result,
-    InitiatedBy,
-    TargetResources,
-    AdditionalDetails
-```
-
-### Phase 3: Attack Simulation
-
-1. Launched the **Tor Browser** and connected through a foreign exit node to mask the origin IP.
-2. Used compromised test-user credentials to authenticate into the Azure portal through the anonymized connection.
-3. Executed unauthorized **deletion of directory/resource configurations**, simulating a destructive insider/external threat scenario.
-
-### Phase 4: Incident Triage & Graph Investigation
-
-1. Sentinel triggered **High-Severity incidents** based on the custom KQL analytics rules.
-2. Used the **Sentinel Investigation Graph** to visually map the attack chain.
-3. Analyzed the **blast radius** and identified all affected resources.
-
-### Phase 5: Remediation & Reporting
-
-1. **Revoked active sessions** and refresh tokens for the compromised user account via Microsoft Entra ID.
-2. **Restored secure baseline configurations** to remediate the impact of the deletions.
-3. Exported an official **SOC Incident Report PDF** for audit trail and compliance documentation.
-
----
-
-## MITRE ATT&CK Mapping
-
-| Tactic | Technique | ID |
-|---|---|---|
-| Impact | Data Destruction | T1485 |
-| Command & Control | Ingress Tool Transfer | T1105 |
-| Defense Evasion | Use of Anonymizing Proxy (Tor) | T1090.003 |
-
----
-
-## Repository Structure
-
-```
-├── README.md
-├── detection-rules/
-│   └── custom_detection_rule.kql
-├── watchlists/
-│   └── high_risk_users.csv
-└── screenshots/
-    ├── sentinel_dashboard.png
-    ├── incident_graph.png
-    └── remediation_success.pdf
+// Surfaces delete operations across Azure resources for review
+AzureActivity
+| where OperationNameValue has "delete"
+| where ActivityStatusValue == "Success"
+| project TimeGenerated, Caller, OperationNameValue, ResourceGroup, _ResourceId, CallerIpAddress
+| order by TimeGenerated desc
 ```
 
 ---
 
-## Screenshots
+## Incident Response Walkthrough
 
-> Screenshots and the final remediation PDF report are located in the /screenshots directory.
+1. **Simulated the attack** — signed in via Tor and performed an unauthorized configuration deletion.
+2. **Alerts fired** from the custom analytics rules; UEBA flagged the anomalous behaviour.
+3. **Triaged in the Investigation Graph** — pivoted across the user, IP, and affected resources to scope the incident.
+4. **Remediated** — revoked the compromised session tokens, restored the deleted configuration to baseline, and **exported a formal SOC incident report.**
 
 ---
 
-*Built by [Kuldeep Mishra](https://github.com/Kuldeep-Mishra00) | SOC Lab Project | Microsoft Sentinel*
+## Tools & Technology
+
+`Microsoft Sentinel` · `Azure Log Analytics Workspace` · `KQL (Kusto Query Language)` · `UEBA` · `MITRE ATT&CK` · `Investigation Graph` · `Incident Response`
+
+---
+
+## What I Learned
+
+- Writing precise KQL detections that catch a technique without drowning the analyst in false positives.
+- Mapping detections to MITRE ATT&CK so alerts carry context, not just noise.
+- The muscle memory of triage → scope → contain → remediate → document.
+
+---
+
+## About Me
+
+**Kuldeep Mishra** — aspiring SOC Analyst.
+📧 km828591@gmail.com · 🔗 [LinkedIn](https://www.linkedin.com/in/kuldeep-mishra-soc/) · 💻 [GitHub](https://github.com/Kuldeep-Mishra00)
